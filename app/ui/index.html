@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Overseer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="panel" id="panel">
+    <header id="header" data-tauri-drag-region>
+      <div class="head-left" data-tauri-drag-region id="head-left"></div>
+      <div class="head-actions">
+        <button class="icon-btn" id="btn-sound" title="Sound"></button>
+        <button class="icon-btn" id="btn-pin" title="Keep on top"></button>
+        <button class="icon-btn" id="btn-collapse" title="Collapse"></button>
+        <button class="icon-btn" id="btn-close" title="Hide to tray"></button>
+      </div>
+    </header>
+    <main id="main"></main>
+    <div id="toast" class="toast" hidden></div>
+  </div>
+  <script src="core/state.js"></script>
+  <script src="core/transcript.js"></script>
+  <script src="sentinel.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+﻿# dependencies and build output
+node_modules/
+app/src-tauri/target/
+app/src-tauri/gen/
+
+# generated: copied from core/ on every dev/build
+app/ui/core/
+
+# personal/local data (contains your prompts and file paths)
+spike/events.jsonl
+spike/findings.txt
+.claude/
+decisions-to-import.json
+app/icon-preview.png
+*.bak-*

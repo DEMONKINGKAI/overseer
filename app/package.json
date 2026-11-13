@@ -1,0 +1,14 @@
+{
+  "name": "overseer",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Your agents have an Overseer now.",
+  "scripts": {
+    "sync-core": "node scripts/sync-core.js",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
