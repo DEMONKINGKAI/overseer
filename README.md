@@ -25,7 +25,22 @@ node hooks/install.js
 Restart your Claude Code sessions. Closing the window hides it to the tray. **Quit Overseer** in the tray menu exits.
 Click a session to copy its `claude --resume <id>` command.
 
-`npm run build` produces an installer in `app/src-tauri/target/release/bundle/`.
+## Install it as an app
+
+```
+cd app
+npm run build
+```
+
+This takes a few minutes. The installers end up in `app/src-tauri/target/release/bundle/`:
+- `nsis/Overseer_0.1.0_x64-setup.exe` (recommended)
+- `msi/Overseer_0.1.0_x64_en-US.msi`
+
+After installing, Overseer is in the Start menu. Pin it to Start or the taskbar if you like.
+Right-click the tray eye → **Start with Windows** to have it waiting in the tray at every login (it starts hidden).
+Launching it again while it's running just brings the window forward.
+
+The hooks still run from this folder (`hooks/`), so keep the repo where it is, or re-run `node hooks/install.js` after moving it.
 
 ## How it works
 

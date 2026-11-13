@@ -15,9 +15,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WindowEvent};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 const PORT: u16 = 47321; // must match hooks/lib.js
 const MAX_EVENTS: usize = 20_000;
@@ -266,6 +267,10 @@ fn main() {
     start_server(shared.clone());
 
     tauri::Builder::default()
+        // must be first: a second launch just brings the running Overseer forward (and avoids a port clash)
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| toggle_window(app, true)))
+        // "Start with Windows" (tray menu). Launched at login with --hidden → straight to the tray.
+        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .plugin(tauri_plugin_notification::init())
         .manage(shared)
         .invoke_handler(tauri::generate_handler![
@@ -278,9 +283,19 @@ fn main() {
             show_window
         ])
         .setup(|app| {
+            // window starts hidden (tauri.conf.json); show it unless we were launched at login
+            if !std::env::args().any(|a| a == "--hidden") {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }
+            let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
             let show = MenuItem::with_id(app, "show", "Show Overseer", true, None::<&str>)?;
+            let autostart = CheckMenuItem::with_id(app, "autostart", "Start with Windows", true, autostart_on, None::<&str>)?;
+            let sep = PredefinedMenuItem::separator(app)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Overseer", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &autostart, &sep, &quit])?;
             TrayIconBuilder::with_id("main")
                 .icon(Image::from_bytes(tray_icon_bytes("calm"))?)
                 .tooltip("Overseer")
@@ -288,6 +303,11 @@ fn main() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => toggle_window(app, true),
+                    "autostart" => {
+                        // the check mark toggles itself on click; mirror that into the OS setting
+                        let al = app.autolaunch();
+                        let _ = if al.is_enabled().unwrap_or(false) { al.disable() } else { al.enable() };
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })

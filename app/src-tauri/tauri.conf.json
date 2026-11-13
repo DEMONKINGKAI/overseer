@@ -19,7 +19,7 @@
         "minWidth": 340,
         "minHeight": 64,
         "resizable": true,
-        "visible": true,
+        "visible": false,
         "decorations": false,
         "transparent": true,
         "shadow": false,
@@ -38,6 +38,10 @@
       "icons/128x128.png",
       "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "shortDescription": "Your agents have an Overseer now.",
+    "longDescription": "A tray widget that shows every local Claude Code session at a glance, and lets you approve permissions, answer questions and queue follow-ups.",
+    "category": "DeveloperTool",
+    "publisher": "DEMONKINGKAI"
   }
 }
