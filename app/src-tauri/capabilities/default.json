@@ -13,6 +13,7 @@
     "core:window:allow-set-size",
     "core:window:allow-set-always-on-top",
     "core:window:allow-minimize",
-    "autostart:default"
+    "autostart:default",
+    "core:window:allow-set-min-size"
   ]
 }

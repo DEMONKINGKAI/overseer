@@ -363,9 +363,17 @@ $("btn-collapse").onclick = async () => {
   ui.collapsed = !ui.collapsed;
   $("panel").classList.toggle("collapsed", ui.collapsed);
   main.style.display = ui.collapsed ? "none" : "";
+  // the window's minimum height (4 sessions) would block collapsing, so lift it while collapsed
+  const MIN = { w: 400, h: 520 };
   try {
-    if (ui.collapsed) { ui.prevHeight = window.innerHeight; await win?.setSize(new LogicalSize(window.innerWidth, 66)); }
-    else await win?.setSize(new LogicalSize(window.innerWidth, Math.max(300, ui.prevHeight)));
+    if (ui.collapsed) {
+      ui.prevHeight = window.innerHeight;
+      await win?.setMinSize(new LogicalSize(MIN.w, 66));
+      await win?.setSize(new LogicalSize(window.innerWidth, 66));
+    } else {
+      await win?.setSize(new LogicalSize(window.innerWidth, Math.max(MIN.h, ui.prevHeight)));
+      await win?.setMinSize(new LogicalSize(MIN.w, MIN.h));
+    }
   } catch (err) { console.warn(err); }
   render(lastView);
 };

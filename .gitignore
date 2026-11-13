@@ -13,3 +13,5 @@ spike/findings.txt
 decisions-to-import.json
 app/icon-preview.png
 *.bak-*
+
+decision-graph.html

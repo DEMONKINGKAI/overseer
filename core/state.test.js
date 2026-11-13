@@ -43,17 +43,35 @@ test("idle_prompt notification = your move, not permission", () => {
   assert.equal(S(st).status, STATUS.YOUR_MOVE);
 });
 
-test("background subagent: Stop while agent runs stays working; SubagentStop finishes it", () => {
+test("background subagent: turn ended = your move (with a note); SubagentStop clears the note", () => {
   const A = { agent_id: "A1", agent_type: "general-purpose" };
   const mid = run([ev(0, "SessionStart"), ev(1, "UserPromptSubmit", { prompt: "delegate" }),
     ev(2, "PreToolUse", { tool_name: "Agent", tool_use_id: "t1" }), ev(2, "PostToolUse", { tool_name: "Agent", tool_use_id: "t1" }),
     ev(3, "Stop", { background_tasks: [{ id: "x" }] }),
     ev(4, "PreToolUse", { tool_name: "Glob", tool_use_id: "t2", tool_input: { pattern: "**/*" }, ...A })]);
-  assert.equal(S(mid).status, STATUS.WORKING);
+  assert.equal(S(mid).status, STATUS.YOUR_MOVE);
+  assert.match(S(mid).activity, /background task running/);
   assert.equal(S(mid).agents.A1.activity, "Searching **/*");
   const done = [ev(5, "PostToolUse", { tool_name: "Glob", tool_use_id: "t2", ...A }), ev(9, "SubagentStop", A)].reduce(reduce, mid);
   assert.equal(S(done).status, STATUS.YOUR_MOVE);
+  assert.equal(S(done).activity, "Done — your move");
   assert.equal(view(done, T0 + 10e3).rows[0].agents[0].status, "done");
+});
+
+test("fork subagents that never send SubagentStop don't leave the session stuck", () => {
+  const F = { agent_id: "F1", agent_type: "fork" };
+  const st = run([ev(0, "SessionStart"), ev(1, "UserPromptSubmit", { prompt: "check" }),
+    ev(2, "PreToolUse", { tool_name: "Bash", tool_use_id: "g", tool_input: { command: "grep -rn import ." }, ...F }),
+    ev(30, "Stop", { background_tasks: [] })]);
+  assert.equal(S(st).agents.F1.status, "done", "empty background_tasks closes leftover agents");
+  assert.equal(S(st).activity, "Done — your move");
+  // no Stop info at all: the silent agent is retired by tick after 10 min
+  const st2 = run([ev(0, "SessionStart"), ev(1, "UserPromptSubmit", { prompt: "check" }),
+    ev(2, "PreToolUse", { tool_name: "Bash", tool_use_id: "g", ...F }), ev(30, "Stop")]);
+  assert.match(S(st2).activity, /background task running/);
+  const later = tick(st2, T0 + 15 * 60e3);
+  assert.equal(later.sessions.S1.agents.F1.status, "done");
+  assert.equal(later.sessions.S1.activity, "Done — your move");
 });
 
 test("internal helper agents (empty type, no tools) are hidden", () => {
@@ -83,7 +101,7 @@ test("long shell commands get a longer grace period than reads", () => {
 test("headless runs (start→end in seconds) are hidden; ended sessions expire", () => {
   const st = run([ev(0, "SessionStart"), ev(1, "UserPromptSubmit", { prompt: "extract" }), ev(2, "Stop"), ev(3, "SessionEnd", { reason: "other" })]);
   assert.equal(view(st, T0 + 4e3).rows.length, 0);
-  const long = run([ev(0, "SessionStart"), ev(100, "SessionEnd", { reason: "prompt_input_exit" })]);
+  const long = run([ev(0, "SessionStart"), ev(5, "UserPromptSubmit", { prompt: "hi" }), ev(100, "SessionEnd", { reason: "prompt_input_exit" })]);
   assert.equal(view(long, T0 + 101e3).rows[0].status, STATUS.ENDED);
   assert.equal(Object.keys(tick(long, T0 + 100e3 + 11 * 60e3).sessions).length, 0);
 });
@@ -228,4 +246,14 @@ test("follow-up: queued while working, delivered at Stop → turn continues", ()
 test("numeric timestamps from the app are accepted", () => {
   const st = run([ev(0, "SessionStart"), { session_id: "S1", ts: T0 + 5000, hook_event_name: "FollowupQueued", message: "m" }]);
   assert.equal(S(st).lastEventAt, T0 + 5000);
+});
+
+test("sessions that are only opened/resumed get no card until something happens", () => {
+  const resumed = run([ev(0, "SessionStart", { source: "resume", model: "claude-opus-5-5" }),
+    ev(60, "Notification", { notification_type: "idle_prompt", message: "Claude is waiting for your input" })]);
+  assert.equal(view(resumed, T0 + 61e3).rows.length, 0, "background resume stays hidden");
+  const used = reduce(resumed, ev(90, "UserPromptSubmit", { prompt: "continue" }));
+  assert.equal(view(used, T0 + 91e3).rows.length, 1, "appears on first real activity");
+  const ended = run([ev(0, "SessionStart"), ev(300, "SessionEnd", { reason: "other" })]);
+  assert.equal(view(ended, T0 + 301e3).rows.length, 0, "an empty session that ends never shows");
 });

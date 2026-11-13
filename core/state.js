@@ -83,6 +83,7 @@ function newSession(e, t) {
     timeline: [],         // [{ id, kind, summary, status: running|done|denied|interrupted, startedAt, endedAt }]
     terminal: null,       // { command, output, running, toolUseId, endedAt }
     queued: null,         // follow-up message waiting for the end of the turn
+    engaged: false,       // anything real happened (prompt, tool, prompt for approval…); until then the card stays hidden
   };
 }
 
@@ -91,13 +92,24 @@ function agentFor(s, e, t) {
   return (s.agents[e.agent_id] ||= { type: e.agent_type || "", status: "running", activity: "", startedAt: t, lastEventAt: t, toolCount: 0 });
 }
 const runningAgents = (s) => Object.values(s.agents).filter((a) => a.status === "running").length;
+function closeAgents(s, t) {
+  for (const [id, a] of Object.entries(s.agents)) if (a.status === "running") { a.status = "done"; a.endedAt = t; }
+  for (const [id, tool] of Object.entries(s.openTools)) if (tool.agentId) delete s.openTools[id];
+}
+function doneLabel(s) {
+  const n = Math.max(runningAgents(s), s.backgroundTasks);
+  return n ? `Your move · ${n} background task${n > 1 ? "s" : ""} running` : "Done — your move";
+}
+const AGENT_SILENT_MS = 10 * 60e3; // a subagent with no events this long is treated as finished
 
 function settle(s) {
   if (s.endedAt) return STATUS.ENDED;
   if (s.ask && s.ask.kind === "question") return STATUS.QUESTION;
   if (s.ask || s.pendingPermission) return STATUS.PERMISSION;
-  const busy = Object.keys(s.openTools).length > 0 || runningAgents(s) > 0 || s.backgroundTasks > 0 || s.compacting;
-  if (s.turnEnded && !busy) return STATUS.YOUR_MOVE;
+  // Once Claude's turn has ended the user can type, so it's their move even if subagents or
+  // background tasks are still running (the activity line says so).
+  const mainBusy = Object.values(s.openTools).some((x) => !x.agentId) || s.compacting;
+  if (s.turnEnded && !mainBusy) return STATUS.YOUR_MOVE;
   return STATUS.WORKING;
 }
 
@@ -156,6 +168,11 @@ function reduce(state, e) {
   if (s.status === STATUS.STALE) s.status = STATUS.WORKING;
   const agent = agentFor(s, e, t);
   if (agent) agent.lastEventAt = t;
+  // Opening, resuming or idle-pinging a session isn't activity: the desktop app's Code tab resumes old
+  // sessions in the background, and those shouldn't get a card until something actually happens.
+  const passive = ev === "SessionStart" || ev === "SessionEnd" || ev === "PreCompact"
+    || (ev === "Notification" && e.notification_type === "idle_prompt");
+  if (!passive) s.engaged = true;
 
   switch (ev) {
     case "SessionStart":
@@ -247,13 +264,14 @@ function reduce(state, e) {
       clearAsk(s);
       if (e.last_assistant_message) s.lastMessage = e.last_assistant_message.slice(0, 400);
       s.backgroundTasks = Array.isArray(e.background_tasks) ? e.background_tasks.length : s.backgroundTasks;
+      if (Array.isArray(e.background_tasks) && e.background_tasks.length === 0) closeAgents(s, t);
       if (e.followup_delivered) { // Overseer handed Claude the queued message: the turn continues
         s.queued = null; s.turnEnded = false; s.lastPrompt = String(e.followup_delivered).slice(0, 300);
         s.activity = `Following up: ${s.lastPrompt}`;
         break;
       }
       s.turnEnded = true;
-      s.activity = runningAgents(s) || s.backgroundTasks ? "Waiting on background agents" : "Done — your move";
+      s.activity = doneLabel(s);
       break;
 
     case "SubagentStop":
@@ -262,7 +280,7 @@ function reduce(state, e) {
         for (const [id, tool] of Object.entries(s.openTools)) if (tool.agentId === e.agent_id) delete s.openTools[id];
         if (s.backgroundTasks > 0 && agent.toolCount > 0) s.backgroundTasks--;
       }
-      if (s.turnEnded && runningAgents(s) === 0 && !s.backgroundTasks) s.activity = "Done — your move";
+      if (s.turnEnded) s.activity = doneLabel(s);
       break;
 
     case "FollowupQueued": s.queued = String(e.message || ""); break;
@@ -289,6 +307,14 @@ function tick(state, now, opts = DEFAULTS) {
   for (const [id, s0] of Object.entries(state.sessions)) {
     if (s0.endedAt && now - s0.endedAt > opts.endedRetentionMs) { changed = true; continue; }
     let s = s0;
+    const silentAgents = Object.values(s.agents).some((a) => a.status === "running" && now - a.lastEventAt > AGENT_SILENT_MS);
+    if (silentAgents) {
+      s = structuredClone(s);
+      for (const a of Object.values(s.agents)) if (a.status === "running" && now - a.lastEventAt > AGENT_SILENT_MS) a.status = "done";
+      for (const [tid, tool] of Object.entries(s.openTools)) if (tool.agentId && s.agents[tool.agentId]?.status === "done") delete s.openTools[tid];
+      if (s.turnEnded) { s.backgroundTasks = Math.min(s.backgroundTasks, runningAgents(s)); s.activity = doneLabel(s); }
+      changed = true;
+    }
     if (s.status === STATUS.WORKING) {
       const tools = Object.values(s.openTools);
       const toolStale = tools.length > 0 && tools.every((tl) => now - tl.startedAt > (opts.staleToolMs[tl.name] ?? opts.staleToolMs.default));
@@ -300,7 +326,7 @@ function tick(state, now, opts = DEFAULTS) {
   return changed ? { ...state, sessions } : state;
 }
 
-const isHidden = (s) => !!s.endedAt && s.endedAt - s.startedAt < DEFAULTS.ephemeralMs;
+const isHidden = (s) => !s.engaged || (!!s.endedAt && s.endedAt - s.startedAt < DEFAULTS.ephemeralMs);
 const visibleAgents = (s) => Object.entries(s.agents)
   .filter(([, a]) => a.type !== "" || a.toolCount > 0)
   .map(([id, a]) => ({ id, ...a }));
